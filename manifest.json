@@ -1,0 +1,33 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "ChestSortedOnSneakRightClick",
+    "description": "Sorts the contents of a chest when you sneak and right-click it.",
+    "uuid": "5627adb9-0a62-4c12-bf1f-08084bd37d24",
+    "version": [1, 0, 2],
+    "min_engine_version": [1, 21, 90]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "568f663e-6278-46d5-9fde-2f629d051797",
+      "version": [1, 0, 0],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.0.0"
+    }
+  ],
+  "metadata": {
+    "authors": [ "p99will" ],
+    "generated_with": {
+      "blockception-minecraft-bedrock": [
+        "8.0.39"
+      ]
+    }
+  }
+}
