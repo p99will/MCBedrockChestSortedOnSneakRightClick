@@ -26,7 +26,7 @@ const log = (p, msg, c = "7") => VERBOSE && p.sendMessage(`§${c}${msg}`);
 // ───────── Event hook ────────────────────────────────────────────────────────
 world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
   if (!ev.player.isSneaking) return; // trigger only when crouching
-  ev.cancel = true; // stop vanilla GUI from opening
+  // ev.cancel = true; // stop vanilla GUI from opening
   system.run(() => sortContainer(ev.player, ev.block)); // run next tick
 });
 
