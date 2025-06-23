@@ -22,13 +22,14 @@ Sneak + click any container (chest, barrel, etc.) to instantly alphabetize and s
 
 - Sneak + interact with a container
 - The mod:
-  - Cancels the default GUI
+  - ~~Cancels the default GUI~~
   - Clones and tallies all items
   - Merges and stacks by item ID and damage
   - Sorts alphabetically
   - Writes the result back the next tick
   - Verifies **total item count matches** original
   - If mismatch, reverts and logs the issue in chat
+  - Opens the sorted chest
 
 ---
 
