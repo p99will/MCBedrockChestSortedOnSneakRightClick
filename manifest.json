@@ -4,7 +4,7 @@
     "name": "ChestSortedOnSneakRightClick",
     "description": "Sorts the contents of a chest when you sneak and right-click it.",
     "uuid": "5627adb9-0a62-4c12-bf1f-08084bd37d24",
-    "version": [1, 1, 0],
+    "version": [1, 1, 1],
     "min_engine_version": [1, 21, 90]
   },
   "modules": [
