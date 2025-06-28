@@ -42,7 +42,7 @@ import {
 } from "@minecraft/server";
 
 const INV_ID = BlockComponentTypes.Inventory; // "minecraft:inventory"
-const VERBOSE = false; // flip to false once you trust it
+let VERBOSE = true; // flip to false once you trust it, can be toggled by command
 const log = (p, msg, c = "7") => VERBOSE && p.sendMessage(`§${c}${msg}`);
 
 // Global flag to allow sorting without sneaking
@@ -51,9 +51,13 @@ let allowSortWithoutSneak = false;
 // Sorting mode: 'alpha' (alphabetical), 'count' (by count), 'type' (by typeId)
 let sortingMode = 'alpha';
 
-// Helper to check if a player is an operator (Bedrock: hasTag('operator') or isOp property if available)
+// Helper to check if a player is an operator or in singleplayer
 function isOperator(player) {
-  // You may need to adjust this depending on your server setup
+  // Singleplayer: only one player in the world
+  try {
+    if (world.getPlayers().length === 1) return true;
+  } catch {}
+  // Multiplayer: must be OP
   return typeof player.hasTag === 'function' && player.hasTag('operator');
 }
 
@@ -65,7 +69,7 @@ world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
   system.run(() => sortContainer(ev.player, ev.block)); // run next tick
 });
 
-// Register commands for operators only
+// Register commands for operators or singleplayer only
 world.afterEvents.chatSend.subscribe(ev => {
   const msg = ev.message.trim();
   const sender = ev.sender;
@@ -74,7 +78,7 @@ world.afterEvents.chatSend.subscribe(ev => {
   // /sortanywhere command
   if (msg === "/sortanywhere") {
     if (!isOperator(sender)) {
-      sender.sendMessage("§c[ChestSort] Only operators can use this command.");
+      sender.sendMessage("§c[ChestSort] Only operators or singleplayer can use this command.");
       ev.cancel = true;
       return;
     }
@@ -87,7 +91,7 @@ world.afterEvents.chatSend.subscribe(ev => {
   // /sortmode <alpha|count|type>
   if (msg.startsWith("/sortmode ")) {
     if (!isOperator(sender)) {
-      sender.sendMessage("§c[ChestSort] Only operators can use this command.");
+      sender.sendMessage("§c[ChestSort] Only operators or singleplayer can use this command.");
       ev.cancel = true;
       return;
     }
@@ -97,6 +101,27 @@ world.afterEvents.chatSend.subscribe(ev => {
       world.sendMessage(`§e[ChestSort] Sorting mode set to §b${mode}§e.`);
     } else {
       sender.sendMessage("§c[ChestSort] Invalid mode. Use /sortmode alpha|count|type");
+    }
+    ev.cancel = true;
+    return;
+  }
+
+  // /sortverbose <on|off>
+  if (msg.startsWith("/sortverbose ")) {
+    if (!isOperator(sender)) {
+      sender.sendMessage("§c[ChestSort] Only operators or singleplayer can use this command.");
+      ev.cancel = true;
+      return;
+    }
+    const arg = msg.split(" ")[1]?.toLowerCase();
+    if (arg === "on") {
+      VERBOSE = true;
+      world.sendMessage("§e[ChestSort] Verbose mode is now §aON§e.");
+    } else if (arg === "off") {
+      VERBOSE = false;
+      world.sendMessage("§e[ChestSort] Verbose mode is now §cOFF§e.");
+    } else {
+      sender.sendMessage("§c[ChestSort] Invalid usage. Use /sortverbose on|off");
     }
     ev.cancel = true;
     return;
@@ -212,57 +237,21 @@ function compareCounts(before, after) {
 }
 
 // Returns a string key for an ItemStack that includes typeId, data, and relevant custom components
-// Optimized and maintainable: uses whitelists, serialization, and is extensible
+// Now uses canonical, order-independent serialization for potion effects and enchantments
 function getStackKey(stk) {
-  // 1. Basic key
   let key = `${stk.typeId}:${stk.data ?? 0}`;
 
-  // 2. Whitelist of components for special items (by typeId or pattern)
-  const componentWhitelist = {
-    "minecraft:potion": ["potion_effects", "minecraft:potion_effects"],
-    "minecraft:splash_potion": ["potion_effects", "minecraft:potion_effects"],
-    "minecraft:lingering_potion": ["potion_effects", "minecraft:potion_effects"],
-    "minecraft:tipped_arrow": ["potion_effects", "minecraft:potion_effects"],
-    "minecraft:suspicious_stew": ["potion_effects", "minecraft:potion_effects"],
-    "minecraft:firework_rocket": ["fireworks", "minecraft:fireworks"],
-    "minecraft:firework_star": ["fireworks", "minecraft:fireworks"],
-    "minecraft:writable_book": ["written_book_contents", "minecraft:written_book_contents"],
-    "minecraft:written_book": ["written_book_contents", "minecraft:written_book_contents"],
-    "minecraft:banner": ["banner_patterns", "minecraft:banner_patterns"],
-    "minecraft:player_head": ["player_head_owner", "minecraft:player_head_owner"],
-    "minecraft:map": ["map_id", "minecraft:map_id"],
-    "minecraft:enchanted_book": ["enchantments", "minecraft:enchantments"],
-    "minecraft:shulker_box": ["container", "minecraft:container"],
-    // Add more as needed
-  };
-
-  // 3. Always check for these on all items
-  const alwaysCheck = [
-    ["enchantments", "minecraft:enchantments"],
-    ["custom_name", "minecraft:custom_name"],
-    ["lore", "minecraft:lore"],
-  ];
-
-  // 4. Helper to get and serialize a component (canonical, sorted)
-  function getComponentData(stk, names) {
-    for (const n of names) {
-      const comp = stk.getComponent(n);
-      if (comp) {
-        // Canonicalize: sort keys if object
-        try {
-          if (typeof comp === "object" && comp !== null) {
-            return JSON.stringify(sortObject(comp));
-          }
-          return JSON.stringify(comp);
-        } catch (e) {
-          return "[err]";
-        }
-      }
-    }
-    return "";
+  // Helper: canonicalize and sort arrays of objects by a key
+  function canonicalArray(arr, sortKey) {
+    if (!Array.isArray(arr)) return arr;
+    return arr.slice().sort((a, b) => {
+      if (a[sortKey] < b[sortKey]) return -1;
+      if (a[sortKey] > b[sortKey]) return 1;
+      return 0;
+    });
   }
 
-  // 5. Canonical object sort for stable serialization
+  // Helper: canonicalize objects recursively
   function sortObject(obj) {
     if (Array.isArray(obj)) return obj.map(sortObject);
     if (obj && typeof obj === "object") {
@@ -274,19 +263,67 @@ function getStackKey(stk) {
     return obj;
   }
 
-  // 6. Use whitelist for special items
-  if (componentWhitelist[stk.typeId]) {
-    for (const compName of componentWhitelist[stk.typeId]) {
-      const data = getComponentData(stk, [compName]);
-      if (data) key += ":" + data;
+  // Special handling for potions, tipped arrows, suspicious stew
+  if (["minecraft:potion","minecraft:splash_potion","minecraft:lingering_potion","minecraft:tipped_arrow","minecraft:suspicious_stew"].includes(stk.typeId)) {
+    const pot = stk.getComponent("potion_effects") || stk.getComponent("minecraft:potion_effects");
+    if (pot && Array.isArray(pot.effects)) {
+      // Sort effects by effect id for canonical key
+      const sorted = canonicalArray(pot.effects, "effect");
+      key += ":pot=" + JSON.stringify(sorted);
     }
   }
 
-  // 7. Always-checked components (enchantments, name, lore)
-  for (const names of alwaysCheck) {
-    const data = getComponentData(stk, names);
-    if (data) key += ":" + data;
+  // Special handling for enchanted books and enchanted items
+  if (stk.typeId === "minecraft:enchanted_book" || stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments")) {
+    const ench = stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments");
+    if (ench && Array.isArray(ench.enchantments)) {
+      // Sort enchantments by id for canonical key
+      const sorted = canonicalArray(ench.enchantments, "id");
+      key += ":ench=" + JSON.stringify(sorted);
+    }
   }
+
+  // Fireworks
+  if (stk.typeId === "minecraft:firework_rocket" || stk.typeId === "minecraft:firework_star") {
+    const fw = stk.getComponent("fireworks") || stk.getComponent("minecraft:fireworks");
+    if (fw) key += ":fw=" + JSON.stringify(sortObject(fw));
+  }
+
+  // Written books
+  if (stk.typeId === "minecraft:writable_book" || stk.typeId === "minecraft:written_book") {
+    const book = stk.getComponent("written_book_contents") || stk.getComponent("minecraft:written_book_contents");
+    if (book) key += ":book=" + JSON.stringify(sortObject(book));
+  }
+
+  // Banners
+  if (stk.typeId === "minecraft:banner") {
+    const banner = stk.getComponent("banner_patterns") || stk.getComponent("minecraft:banner_patterns");
+    if (banner) key += ":banner=" + JSON.stringify(sortObject(banner));
+  }
+
+  // Player heads
+  if (stk.typeId === "minecraft:player_head") {
+    const head = stk.getComponent("player_head_owner") || stk.getComponent("minecraft:player_head_owner");
+    if (head) key += ":head=" + JSON.stringify(sortObject(head));
+  }
+
+  // Maps
+  if (stk.typeId === "minecraft:map") {
+    const map = stk.getComponent("map_id") || stk.getComponent("minecraft:map_id");
+    if (map) key += ":map=" + JSON.stringify(sortObject(map));
+  }
+
+  // Shulker boxes
+  if (stk.typeId.endsWith("shulker_box")) {
+    const shulker = stk.getComponent("container") || stk.getComponent("minecraft:container");
+    if (shulker) key += ":shulker=" + JSON.stringify(sortObject(shulker));
+  }
+
+  // Custom name and lore (for all items)
+  const name = stk.getComponent("custom_name") || stk.getComponent("minecraft:custom_name");
+  if (name) key += ":name=" + JSON.stringify(name);
+  const lore = stk.getComponent("lore") || stk.getComponent("minecraft:lore");
+  if (lore) key += ":lore=" + JSON.stringify(lore);
 
   return key;
 }
