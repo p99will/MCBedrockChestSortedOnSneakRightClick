@@ -47,11 +47,11 @@ function sortContainer(player, clickedBlock) {
   const size = cont.size;
   const before = snapshot(cont);
 
-  // Build merged stacks keyed by id:data (respecting un‑stackables)
+  // Build merged stacks keyed by id:data:custom (respecting un‑stackables)
   const merged = new Map();
   for (const stk of before) {
     if (!stk) continue;
-    const key = `${stk.typeId}:${stk.data ?? 0}`;
+    const key = getStackKey(stk);
     if (!merged.has(key))
       merged.set(key, { proto: stk.clone(), qty: 0, max: stk.maxAmount });
     merged.get(key).qty += stk.amount;
@@ -98,9 +98,9 @@ function snapshot(container) {
 
 // Returns null if counts identical, otherwise a human diff string
 function compareCounts(before, after) {
-  const tally = new Map(); // id:data -> net count
+  const tally = new Map(); // id:data:custom -> net count
   const add = (m, stk, delta) => {
-    const k = `${stk.typeId}:${stk.data ?? 0}`;
+    const k = getStackKey(stk);
     m.set(k, (m.get(k) || 0) + delta * stk.amount);
   };
   for (const s of before) if (s) add(tally, s, 1);
@@ -111,4 +111,88 @@ function compareCounts(before, after) {
   return problems
     .map(([k, v]) => `${k} net ${v > 0 ? "+" : ""}${v}`)
     .join(", ");
+}
+
+// Returns a string key for an ItemStack that includes typeId, data, and relevant custom components
+function getStackKey(stk) {
+  // Basic key
+  let key = `${stk.typeId}:${stk.data ?? 0}`;
+
+  // List of typeIds that need special handling
+  const customTypes = [
+    "minecraft:potion",
+    "minecraft:splash_potion",
+    "minecraft:lingering_potion",
+    "minecraft:tipped_arrow",
+    "minecraft:suspicious_stew",
+    "minecraft:firework_rocket",
+    "minecraft:firework_star",
+    "minecraft:writable_book",
+    "minecraft:written_book",
+    "minecraft:banner",
+    "minecraft:player_head",
+    "minecraft:map",
+    "minecraft:enchanted_book",
+    "minecraft:shulker_box",
+    // Add more as needed
+  ];
+
+  if (customTypes.includes(stk.typeId)) {
+    // Try to get all components and stringify them for comparison
+    // Only include relevant components for each type
+    let custom = "";
+    try {
+      if (stk.typeId.includes("potion") || stk.typeId === "minecraft:tipped_arrow" || stk.typeId === "minecraft:suspicious_stew") {
+        // Potions, tipped arrows, suspicious stew: effects
+        const eff = stk.getComponent("potion_effects")?.effects || stk.getComponent("minecraft:potion_effects")?.effects;
+        if (eff) custom += JSON.stringify(eff);
+      }
+      if (stk.typeId.startsWith("minecraft:firework_")) {
+        // Fireworks: explosion, flight, etc.
+        const fw = stk.getComponent("fireworks") || stk.getComponent("minecraft:fireworks");
+        if (fw) custom += JSON.stringify(fw);
+      }
+      if (stk.typeId === "minecraft:writable_book" || stk.typeId === "minecraft:written_book") {
+        const book = stk.getComponent("minecraft:written_book_contents") || stk.getComponent("written_book_contents");
+        if (book) custom += JSON.stringify(book);
+      }
+      if (stk.typeId === "minecraft:banner") {
+        const banner = stk.getComponent("minecraft:banner_patterns") || stk.getComponent("banner_patterns");
+        if (banner) custom += JSON.stringify(banner);
+      }
+      if (stk.typeId === "minecraft:player_head") {
+        const head = stk.getComponent("minecraft:player_head_owner") || stk.getComponent("player_head_owner");
+        if (head) custom += JSON.stringify(head);
+      }
+      if (stk.typeId === "minecraft:map") {
+        const map = stk.getComponent("minecraft:map_id") || stk.getComponent("map_id");
+        if (map) custom += JSON.stringify(map);
+      }
+      if (stk.typeId === "minecraft:enchanted_book" || stk.getComponent("enchantments")) {
+        const ench = stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments");
+        if (ench) custom += JSON.stringify(ench);
+      }
+      if (stk.typeId.endsWith("shulker_box")) {
+        const shulker = stk.getComponent("minecraft:container") || stk.getComponent("container");
+        if (shulker) custom += JSON.stringify(shulker);
+      }
+      // Add more as needed
+    } catch (e) {
+      custom += "[err]";
+    }
+    key += ":" + custom;
+  } else {
+    // For all other items, also check for enchantments, name, and lore
+    try {
+      const ench = stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments");
+      if (ench) key += ":" + JSON.stringify(ench);
+      const name = stk.getComponent("minecraft:custom_name") || stk.getComponent("custom_name");
+      if (name) key += ":" + JSON.stringify(name);
+      const lore = stk.getComponent("minecraft:lore") || stk.getComponent("lore");
+      if (lore) key += ":" + JSON.stringify(lore);
+    } catch (e) {
+      key += ":[err]";
+    }
+  }
+  return key;
 }
