@@ -1,63 +1,63 @@
-# Chest Sorter (Minecraft Bedrock Edition)
+# MCBedrockChestSortedOnSneakRightClick
 
-A powerful inventory-sorting behavior pack for Minecraft Bedrock 1.21.90+.  
-Sneak + click any container (chest, barrel, etc.) to instantly alphabetize and stack its contents — no cheats required!
+Robust, cheat-free chest sorting for Minecraft Bedrock Dedicated Server (BDS) and single-player 1.21.90+.
 
-![Chest Sorter Icon](./pack_icon.png)
+## Features & Improvements
+
+- **Sneak-Click Sorting:** Sneak (crouch) and right-click any inventory block (chest, barrel, etc.) to sort and stack its contents.
+- **Global Sorting Toggle:** Operators can use `/sortanywhere` to allow sorting without sneaking.
+- **Sorting Modes:** Operators can use `/sortmode <alpha|count|type>` to change sorting order:
+  - `alpha`: Alphabetical (default)
+  - `count`: By item count (descending)
+  - `type`: By item typeId
+- **Visual Feedback:** Sorting triggers happy villager particles and a level-up sound at the chest.
+- **Performance Optimized:** Efficient array operations and preallocation for large containers.
+- **Special Item Handling:** Correctly distinguishes potions, tipped arrows, suspicious stew, fireworks, books, banners, player heads, maps, enchanted books, shulker boxes, and any item with enchantments, custom names, or lore.
+- **Rollback on Error:** If sorting fails (e.g., due to item loss), the chest is rolled back and a precise diff is shown.
+- **Operator-Only Commands:** Only players with the `operator` tag can use `/sortanywhere` and `/sortmode`.
+
+## Commands
+
+### /sortanywhere
+Toggles whether sneaking is required to trigger sorting. Only available to operators.
+
+**Usage:**
+```
+/sortanywhere
+```
+Toggles between requiring sneaking and allowing sorting on any right-click.
+
+### /sortmode <alpha|count|type>
+Changes the sorting mode for all players. Only available to operators.
+
+**Usage:**
+```
+/sortmode alpha   # Alphabetical (default)
+/sortmode count   # By item count (descending)
+/sortmode type    # By item typeId
+```
+
+## Visual Feedback
+- Sorting a chest triggers happy villager particles and a level-up sound at the chest location.
+
+## Permissions
+- Only players with the `operator` tag can use `/sortanywhere` and `/sortmode`.
+
+## Error Handling
+- If sorting fails (e.g., due to item loss or mismatch), the chest is rolled back to its previous state and a detailed error is shown in chat.
+
+## Performance
+- Sorting is optimized for large containers using preallocated arrays and efficient sorting algorithms.
+
+## Extending
+- The script is designed to be maintainable and extensible. See `getStackKey` in `main.js` for how special items are handled.
 
 ---
+For a full feature list and usage guide, see [CATALOGUE.md](./CATALOGUE.md).
 
-## 📦 Features
+## License
 
-- ✅ Works in **singleplayer**, **multiplayer**, and **dedicated server (BDS)**
-- ✅ **Stacks up to each item’s actual max stack size**
-- ✅ **Alphabetical sorting** by item type ID
-- ✅ **Safe rollback** if any item gets lost
-- ✅ Fully written in JavaScript using `@minecraft/server` v2.0.0
-- ✅ Supports all vanilla containers with inventories
-
----
-
-## 🛠️ How It Works
-
-- Sneak + interact with a container
-- The mod:
-  - ~~Cancels the default GUI~~
-  - Clones and tallies all items
-  - Merges and stacks by item ID and damage
-  - Sorts alphabetically
-  - Writes the result back the next tick
-  - Verifies **total item count matches** original
-  - If mismatch, reverts and logs the issue in chat
-  - Opens the sorted chest
-
----
-
-## 🔧 Installation
-
-1. Enable **Script API** and **Beta APIs** (optional) in your world settings.
-2. Drop this behavior pack into your `behavior_packs` folder.
-3. In the world folder, add the behavior pack to `world_behavior_packs.json`.
-4. Load the world and enjoy streamlined storage.
-
-> Cheats are **not required** — all features work in survival without command use.
-
----
-
-## 📁 File Structure
-
-📦 chest-sorter/
-├── manifest.json
-├── pack_icon.png
-└── scripts/
-└── main.js
-
-
----
-
-## 🧪 Tested On
-
-- Minecraft Bedrock 1.21.90+
+MIT
 - Windows 10/11, Dedicated Server (BDS)
 - Singleplayer + local multiplayer
 

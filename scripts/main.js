@@ -3,14 +3,36 @@
 // Sneak‑click any inventory block (chest, barrel, etc.) while crouching to
 // stack + alphabetise its contents. No cheats are required.
 //
-// Key improvements in this version
+// Features & Improvements:
 // • Uses next‑tick scheduling (system.run) so writes persist.
 // • Stacks up to each item’s own maxAmount (64 for most items, 1 for tools, etc.).
 // • Verifies integrity **by total item counts only** (slot order obviously changes!),
 //   preventing false roll‑backs.
 // • If counts differ, rolls back and prints a *precise* diff of missing/extra items.
 // • Single VERBOSE flag to toggle chat spam.
+// • Visual feedback: happy villager particles and level-up sound on successful sort.
+// • Performance: optimized array operations and preallocation for large containers.
+// • Sorting modes: /sortmode <alpha|count|type> (operator-only) to change sorting order.
+// • Operator-only commands: /sortanywhere and /sortmode require operator status (hasTag("operator")).
+// • /sortanywhere toggles whether sneaking is required for sorting.
 // -----------------------------------------------------------------------------
+//
+// Commands:
+//   /sortanywhere
+//     - Toggle global sorting without sneaking (operator only).
+//   /sortmode <alpha|count|type>
+//     - Change sorting mode: alphabetical (default), by item count, or by typeId (operator only).
+//
+// Visual Feedback:
+//   - Sorting triggers happy villager particles and a level-up sound at the chest location.
+//
+// Performance:
+//   - Sorting is optimized for large containers using preallocated arrays and efficient sorting.
+//
+// Permissions:
+//   - Only players with the 'operator' tag can use /sortanywhere and /sortmode.
+//
+// See CATALOGUE.md for a full feature list and usage guide.
 
 import {
   world,
@@ -23,11 +45,62 @@ const INV_ID = BlockComponentTypes.Inventory; // "minecraft:inventory"
 const VERBOSE = false; // flip to false once you trust it
 const log = (p, msg, c = "7") => VERBOSE && p.sendMessage(`§${c}${msg}`);
 
+// Global flag to allow sorting without sneaking
+let allowSortWithoutSneak = false;
+
+// Sorting mode: 'alpha' (alphabetical), 'count' (by count), 'type' (by typeId)
+let sortingMode = 'alpha';
+
+// Helper to check if a player is an operator (Bedrock: hasTag('operator') or isOp property if available)
+function isOperator(player) {
+  // You may need to adjust this depending on your server setup
+  return typeof player.hasTag === 'function' && player.hasTag('operator');
+}
+
 // ───────── Event hook ────────────────────────────────────────────────────────
 world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
-  if (!ev.player.isSneaking) return; // trigger only when crouching
+  if (!allowSortWithoutSneak && !ev.player.isSneaking) return; // Only require sneaking if not globally enabled
   // ev.cancel = true; // stop vanilla GUI from opening
+  // Performance: batch system.run if many events (not needed for single chest, but ready for future multi-chest)
   system.run(() => sortContainer(ev.player, ev.block)); // run next tick
+});
+
+// Register commands for operators only
+world.afterEvents.chatSend.subscribe(ev => {
+  const msg = ev.message.trim();
+  const sender = ev.sender;
+  if (!sender || typeof sender.sendMessage !== 'function') return;
+
+  // /sortanywhere command
+  if (msg === "/sortanywhere") {
+    if (!isOperator(sender)) {
+      sender.sendMessage("§c[ChestSort] Only operators can use this command.");
+      ev.cancel = true;
+      return;
+    }
+    allowSortWithoutSneak = !allowSortWithoutSneak;
+    world.sendMessage(`§e[ChestSort] Sorting without sneaking is now ${allowSortWithoutSneak ? "§aENABLED" : "§cDISABLED"}§e.`);
+    ev.cancel = true;
+    return;
+  }
+
+  // /sortmode <alpha|count|type>
+  if (msg.startsWith("/sortmode ")) {
+    if (!isOperator(sender)) {
+      sender.sendMessage("§c[ChestSort] Only operators can use this command.");
+      ev.cancel = true;
+      return;
+    }
+    const mode = msg.split(" ")[1]?.toLowerCase();
+    if (["alpha", "count", "type"].includes(mode)) {
+      sortingMode = mode;
+      world.sendMessage(`§e[ChestSort] Sorting mode set to §b${mode}§e.`);
+    } else {
+      sender.sendMessage("§c[ChestSort] Invalid mode. Use /sortmode alpha|count|type");
+    }
+    ev.cancel = true;
+    return;
+  }
 });
 
 // ───────── Main sorter ────────────────────────────────────────────────────────
@@ -57,23 +130,45 @@ function sortContainer(player, clickedBlock) {
     merged.get(key).qty += stk.amount;
   }
 
-  // Produce alphabetically sorted array of stacks, split by max stack size
-  const final = [];
-  [...merged.keys()].sort().forEach((k) => {
+  // Performance: Preallocate final array
+  const final = new Array(size);
+  let idx = 0;
+
+  // Sorting modes
+  let sortedKeys;
+  if (sortingMode === 'count') {
+    sortedKeys = [...merged.keys()].sort((a, b) => merged.get(b).qty - merged.get(a).qty || a.localeCompare(b));
+  } else if (sortingMode === 'type') {
+    sortedKeys = [...merged.keys()].sort((a, b) => merged.get(a).proto.typeId.localeCompare(merged.get(b).proto.typeId) || a.localeCompare(b));
+  } else {
+    // Default: alphabetical by key
+    sortedKeys = [...merged.keys()].sort();
+  }
+
+  for (const k of sortedKeys) {
     const { proto, qty, max } = merged.get(k);
     let left = qty;
-    while (left > 0 && final.length < size) {
+    while (left > 0 && idx < size) {
       const s = proto.clone();
       s.amount = Math.min(left, max);
-      final.push(s);
+      final[idx++] = s;
       left -= s.amount;
     }
-  });
-  while (final.length < size) final.push(null);
+  }
+  while (idx < size) final[idx++] = null;
 
   // Write new order
   cont.clearAll();
-  final.forEach((stk, i) => stk && cont.setItem(i, stk));
+  for (let i = 0; i < size; ++i) {
+    const stk = final[i];
+    if (stk) cont.setItem(i, stk);
+  }
+
+  // Visual feedback: particles and sound
+  try {
+    player.dimension.runCommandAsync(`particle minecraft:happy_villager ${clickedBlock.location.x + 0.5} ${clickedBlock.location.y + 1.2} ${clickedBlock.location.z + 0.5} 0.3 0.5 0.3 0 20`);
+    player.dimension.runCommandAsync(`playsound random.levelup @a ${clickedBlock.location.x + 0.5} ${clickedBlock.location.y + 1.2} ${clickedBlock.location.z + 0.5} 1 1`);
+  } catch (e) {}
 
   // Verify counts (ignore slot order)
   const after = snapshot(cont);
@@ -83,9 +178,12 @@ function sortContainer(player, clickedBlock) {
     log(player, `§c❌ Sorting failed – ${diffMsg}`);
     // Roll back
     cont.clearAll();
-    before.forEach((stk, i) => stk && cont.setItem(i, stk));
+    for (let i = 0; i < size; ++i) {
+      const stk = before[i];
+      if (stk) cont.setItem(i, stk);
+    }
   } else {
-    log(player, "§aChest sorted!");
+    log(player, `§aChest sorted! [mode: ${sortingMode}]`);
   }
 }
 
@@ -114,85 +212,81 @@ function compareCounts(before, after) {
 }
 
 // Returns a string key for an ItemStack that includes typeId, data, and relevant custom components
+// Optimized and maintainable: uses whitelists, serialization, and is extensible
 function getStackKey(stk) {
-  // Basic key
+  // 1. Basic key
   let key = `${stk.typeId}:${stk.data ?? 0}`;
 
-  // List of typeIds that need special handling
-  const customTypes = [
-    "minecraft:potion",
-    "minecraft:splash_potion",
-    "minecraft:lingering_potion",
-    "minecraft:tipped_arrow",
-    "minecraft:suspicious_stew",
-    "minecraft:firework_rocket",
-    "minecraft:firework_star",
-    "minecraft:writable_book",
-    "minecraft:written_book",
-    "minecraft:banner",
-    "minecraft:player_head",
-    "minecraft:map",
-    "minecraft:enchanted_book",
-    "minecraft:shulker_box",
+  // 2. Whitelist of components for special items (by typeId or pattern)
+  const componentWhitelist = {
+    "minecraft:potion": ["potion_effects", "minecraft:potion_effects"],
+    "minecraft:splash_potion": ["potion_effects", "minecraft:potion_effects"],
+    "minecraft:lingering_potion": ["potion_effects", "minecraft:potion_effects"],
+    "minecraft:tipped_arrow": ["potion_effects", "minecraft:potion_effects"],
+    "minecraft:suspicious_stew": ["potion_effects", "minecraft:potion_effects"],
+    "minecraft:firework_rocket": ["fireworks", "minecraft:fireworks"],
+    "minecraft:firework_star": ["fireworks", "minecraft:fireworks"],
+    "minecraft:writable_book": ["written_book_contents", "minecraft:written_book_contents"],
+    "minecraft:written_book": ["written_book_contents", "minecraft:written_book_contents"],
+    "minecraft:banner": ["banner_patterns", "minecraft:banner_patterns"],
+    "minecraft:player_head": ["player_head_owner", "minecraft:player_head_owner"],
+    "minecraft:map": ["map_id", "minecraft:map_id"],
+    "minecraft:enchanted_book": ["enchantments", "minecraft:enchantments"],
+    "minecraft:shulker_box": ["container", "minecraft:container"],
     // Add more as needed
+  };
+
+  // 3. Always check for these on all items
+  const alwaysCheck = [
+    ["enchantments", "minecraft:enchantments"],
+    ["custom_name", "minecraft:custom_name"],
+    ["lore", "minecraft:lore"],
   ];
 
-  if (customTypes.includes(stk.typeId)) {
-    // Try to get all components and stringify them for comparison
-    // Only include relevant components for each type
-    let custom = "";
-    try {
-      if (stk.typeId.includes("potion") || stk.typeId === "minecraft:tipped_arrow" || stk.typeId === "minecraft:suspicious_stew") {
-        // Potions, tipped arrows, suspicious stew: effects
-        const eff = stk.getComponent("potion_effects")?.effects || stk.getComponent("minecraft:potion_effects")?.effects;
-        if (eff) custom += JSON.stringify(eff);
+  // 4. Helper to get and serialize a component (canonical, sorted)
+  function getComponentData(stk, names) {
+    for (const n of names) {
+      const comp = stk.getComponent(n);
+      if (comp) {
+        // Canonicalize: sort keys if object
+        try {
+          if (typeof comp === "object" && comp !== null) {
+            return JSON.stringify(sortObject(comp));
+          }
+          return JSON.stringify(comp);
+        } catch (e) {
+          return "[err]";
+        }
       }
-      if (stk.typeId.startsWith("minecraft:firework_")) {
-        // Fireworks: explosion, flight, etc.
-        const fw = stk.getComponent("fireworks") || stk.getComponent("minecraft:fireworks");
-        if (fw) custom += JSON.stringify(fw);
-      }
-      if (stk.typeId === "minecraft:writable_book" || stk.typeId === "minecraft:written_book") {
-        const book = stk.getComponent("minecraft:written_book_contents") || stk.getComponent("written_book_contents");
-        if (book) custom += JSON.stringify(book);
-      }
-      if (stk.typeId === "minecraft:banner") {
-        const banner = stk.getComponent("minecraft:banner_patterns") || stk.getComponent("banner_patterns");
-        if (banner) custom += JSON.stringify(banner);
-      }
-      if (stk.typeId === "minecraft:player_head") {
-        const head = stk.getComponent("minecraft:player_head_owner") || stk.getComponent("player_head_owner");
-        if (head) custom += JSON.stringify(head);
-      }
-      if (stk.typeId === "minecraft:map") {
-        const map = stk.getComponent("minecraft:map_id") || stk.getComponent("map_id");
-        if (map) custom += JSON.stringify(map);
-      }
-      if (stk.typeId === "minecraft:enchanted_book" || stk.getComponent("enchantments")) {
-        const ench = stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments");
-        if (ench) custom += JSON.stringify(ench);
-      }
-      if (stk.typeId.endsWith("shulker_box")) {
-        const shulker = stk.getComponent("minecraft:container") || stk.getComponent("container");
-        if (shulker) custom += JSON.stringify(shulker);
-      }
-      // Add more as needed
-    } catch (e) {
-      custom += "[err]";
     }
-    key += ":" + custom;
-  } else {
-    // For all other items, also check for enchantments, name, and lore
-    try {
-      const ench = stk.getComponent("enchantments") || stk.getComponent("minecraft:enchantments");
-      if (ench) key += ":" + JSON.stringify(ench);
-      const name = stk.getComponent("minecraft:custom_name") || stk.getComponent("custom_name");
-      if (name) key += ":" + JSON.stringify(name);
-      const lore = stk.getComponent("minecraft:lore") || stk.getComponent("lore");
-      if (lore) key += ":" + JSON.stringify(lore);
-    } catch (e) {
-      key += ":[err]";
+    return "";
+  }
+
+  // 5. Canonical object sort for stable serialization
+  function sortObject(obj) {
+    if (Array.isArray(obj)) return obj.map(sortObject);
+    if (obj && typeof obj === "object") {
+      return Object.keys(obj).sort().reduce((acc, k) => {
+        acc[k] = sortObject(obj[k]);
+        return acc;
+      }, {});
+    }
+    return obj;
+  }
+
+  // 6. Use whitelist for special items
+  if (componentWhitelist[stk.typeId]) {
+    for (const compName of componentWhitelist[stk.typeId]) {
+      const data = getComponentData(stk, [compName]);
+      if (data) key += ":" + data;
     }
   }
+
+  // 7. Always-checked components (enchantments, name, lore)
+  for (const names of alwaysCheck) {
+    const data = getComponentData(stk, names);
+    if (data) key += ":" + data;
+  }
+
   return key;
 }
